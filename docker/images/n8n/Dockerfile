@@ -1,5 +1,5 @@
 ARG NODE_VERSION=22
-ARG N8N_VERSION=snapshot
+ARG N8N_VERSION=1.112.4
 ARG LAUNCHER_VERSION=1.3.1
 ARG TARGETPLATFORM
 
@@ -8,12 +8,20 @@ ARG TARGETPLATFORM
 # ==============================================================================
 FROM n8nio/base:${NODE_VERSION} AS system-deps
 
-# ==============================================================================
-# STAGE 2: Application Artifact Processor
-# ==============================================================================
+# STAGE 2: Application Artifact Processor (download n8n package for pinned version)
 FROM alpine:3.22.0 AS app-artifact-processor
+ARG N8N_VERSION
 
-COPY ./compiled /app/
+RUN set -e; \
+    apk add --no-cache wget tar; \
+    mkdir -p /app && cd /app; \
+    # fetch the exact n8n version tarball from npm registry
+    wget -q "https://registry.npmjs.org/n8n/-/n8n-${N8N_VERSION}.tgz" -O n8n.tgz; \
+    tar -xzf n8n.tgz; \
+    # npm tarballs unpack to a 'package' folder; keep it as /app
+    mv package/* .; \
+    rm -rf package n8n.tgz
+
 
 # ==============================================================================
 # STAGE 3: Task Runner Launcher
@@ -57,7 +65,7 @@ COPY docker/images/n8n/docker-entrypoint.sh /
 COPY docker/images/n8n/n8n-task-runners.json /etc/n8n-task-runners.json
 
 RUN cd /usr/local/lib/node_modules/n8n && \
-		npm rebuild sqlite3 && \
+		npm rebuild sqlite3 --build-from-source && \
 		ln -s /usr/local/lib/node_modules/n8n/bin/n8n /usr/local/bin/n8n && \
     mkdir -p /home/node/.n8n && \
     chown -R node:node /home/node
