@@ -70,7 +70,13 @@ RUN cd /usr/local/lib/node_modules/n8n && \
     mkdir -p /home/node/.n8n && \
     chown -R node:node /home/node
 
-RUN cd /usr/local/lib/node_modules/n8n/node_modules/pdfjs-dist && npm install @napi-rs/canvas
+# Optional: Only install @napi-rs/canvas if pdfjs-dist exists (some n8n versions don't ship it)
+RUN if [ -d "/usr/local/lib/node_modules/n8n/node_modules/pdfjs-dist" ]; then \
+      cd /usr/local/lib/node_modules/n8n/node_modules/pdfjs-dist && \
+      npm install --omit=dev @napi-rs/canvas; \
+    else \
+      echo "pdfjs-dist not present in this n8n version; skipping canvas install"; \
+    fi
 
 EXPOSE 5678/tcp
 USER node
