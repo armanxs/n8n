@@ -4,17 +4,13 @@ ARG N8N_VERSION=1.112.4
 ARG LAUNCHER_VERSION=1.3.1
 ARG TARGETPLATFORM
 
-# ======================================================================
-# STAGE 1: Base (Node + system deps from official n8n base)
-# ======================================================================
-FROM n8nio/base:${NODE_VERSION} AS system-deps
+# ===== Stage 1: Base with Node + deps =====
+FROM n8nio/base:${NODE_VERSION} AS base
+WORKDIR /home/node
 
-# ======================================================================
-# STAGE 2: Fetch n8n package for the pinned version
-# ======================================================================
-FROM alpine:3.22.0 AS app-artifact-processor
+# ===== Stage 2: Fetch n8n package for pinned version =====
+FROM alpine:3.22.0 AS app
 ARG N8N_VERSION
-
 RUN set -e; \
     apk add --no-cache wget tar; \
     mkdir -p /app && cd /app; \
@@ -23,13 +19,10 @@ RUN set -e; \
     mv package/* .; \
     rm -rf package n8n.tgz
 
-# ======================================================================
-# STAGE 3: Download task-runner launcher (optional but supported)
-# ======================================================================
-FROM alpine:3.22.0 AS launcher-downloader
+# ===== Stage 3: (optional) task runner launcher =====
+FROM alpine:3.22.0 AS launcher
 ARG TARGETPLATFORM
 ARG LAUNCHER_VERSION
-
 RUN set -e; \
     case "$TARGETPLATFORM" in \
       "linux/amd64") ARCH_NAME="amd64" ;; \
@@ -45,50 +38,28 @@ RUN set -e; \
     tar xzf task-runner-launcher-${LAUNCHER_VERSION}-linux-${ARCH_NAME}.tar.gz -C /launcher-bin; \
     cd / && rm -rf /launcher-temp
 
-# ======================================================================
-# STAGE 4: Final runtime image
-# ======================================================================
-FROM system-deps AS runtime
+# ===== Stage 4: Final runtime image =====
+FROM base AS runtime
 
 ARG N8N_VERSION
-ARG N8N_RELEASE_TYPE=dev
+ENV NODE_ENV=production \
+    NODE_ICU_DATA=/usr/local/lib/node_modules/full-icu \
+    SHELL=/bin/sh
 
-ENV NODE_ENV=production
-ENV N8N_RELEASE_TYPE=${N8N_RELEASE_TYPE}
-ENV NODE_ICU_DATA=/usr/local/lib/node_modules/full-icu
-ENV SHELL=/bin/sh
-
-WORKDIR /home/node
-
-# n8n app + launcher + entrypoint/scripts
-COPY --from=app-artifact-processor /app /usr/local/lib/node_modules/n8n
-COPY --from=launcher-downloader /launcher-bin/* /usr/local/bin/
-COPY docker/images/n8n/docker-entrypoint.sh /
-COPY docker/images/n8n/n8n-task-runners.json /etc/n8n-task-runners.json
-
-# Make entrypoint executable and finalize n8n bin
+# put n8n in place and symlink the bin
+COPY --from=app /app /usr/local/lib/node_modules/n8n
 RUN set -e; \
     cd /usr/local/lib/node_modules/n8n && \
     npm rebuild sqlite3 --build-from-source && \
     ln -s /usr/local/lib/node_modules/n8n/bin/n8n /usr/local/bin/n8n && \
     mkdir -p /home/node/.n8n && \
-    chown -R node:node /home/node && \
-    chmod +x /docker-entrypoint.sh
+    chown -R node:node /home/node
 
-# Optional add-on: only install @napi-rs/canvas if pdfjs-dist exists
-RUN if [ -d "/usr/local/lib/node_modules/n8n/node_modules/pdfjs-dist" ]; then \
-      cd /usr/local/lib/node_modules/n8n/node_modules/pdfjs-dist && \
-      npm install --omit=dev @napi-rs/canvas; \
-    else \
-      echo "pdfjs-dist not present in this n8n version; skipping canvas install"; \
-    fi
+# optional: task runner launcher binaries
+COPY --from=launcher /launcher-bin/* /usr/local/bin/
 
+# NOTE: we DO NOT use an entrypoint script anymore.
+# We start n8n explicitly on Railway’s assigned $PORT and 0.0.0.0.
 EXPOSE 5678/tcp
 USER node
-ENTRYPOINT ["tini", "--", "/docker-entrypoint.sh"]
-
-LABEL org.opencontainers.image.title="n8n" \
-      org.opencontainers.image.description="Workflow Automation Tool" \
-      org.opencontainers.image.source="https://github.com/n8n-io/n8n" \
-      org.opencontainers.image.url="https://n8n.io" \
-      org.opencontainers.image.version=${N8N_VERSION}
+CMD ["/bin/sh", "-lc", "echo \"Starting n8n on 0.0.0.0:${PORT:-5678}\"; n8n start --port ${PORT:-5678} --host 0.0.0.0"]
