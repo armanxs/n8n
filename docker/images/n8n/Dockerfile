@@ -63,3 +63,9 @@ COPY --from=launcher /launcher-bin/* /usr/local/bin/
 EXPOSE 5678/tcp
 USER node
 CMD ["/bin/sh", "-lc", "echo \"Starting n8n on 0.0.0.0:${PORT:-5678}\"; n8n start --port ${PORT:-5678} --host 0.0.0.0"]
+# --- keep everything above as-is ---
+
+# We explicitly start n8n on Railway's assigned $PORT and 0.0.0.0
+EXPOSE 5678
+USER node
+CMD ["/bin/sh", "-lc", "echo Starting n8n on 0.0.0.0:${PORT:-5678}; n8n start --port ${PORT:-5678} --host 0.0.0.0"]
